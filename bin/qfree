@@ -1,0 +1,133 @@
+#!/usr/bin/env perl
+
+use strict;
+use Getopt::Long;
+use Pod::Usage;
+use constant VERSION_STRING => "1.10";
+
+my $debug = 0;
+my $flag_help = 0;
+my $flag_man = 0;
+my $param_memory = 8;
+my $param_slots = 1;
+GetOptions(
+	"m|memory|mem_free|h_vmem=i"   => \$param_memory,
+	"s|slots=i"   => \$param_slots,
+	"debug" => \$debug,
+	"h|help"  => \$flag_help,
+	"man"   => \$flag_man
+) or pod2usage(2);
+pod2usage(1) if $flag_help;
+pod2usage(-verbose => 2) if $flag_man;
+
+my @lines = `qstat -F -xml`;
+
+my $current_host = undef;
+my $current_queue_name = undef;
+my $current_queue_type = undef;
+my $current_queue_state = undef;
+my $current_slots_used;
+my $current_slots_resv;
+my $current_slots_total;
+my $current_mem_req;
+
+my $qname_to_obj = {};
+for(@lines) {
+	chomp;
+	if(m|<Queue-List>|) {
+		$current_host = undef;
+		$current_queue_name = undef;
+		$current_queue_type = undef;
+		$current_queue_state = undef;
+		$current_mem_req = undef;
+		$current_slots_used = 0;
+		$current_slots_resv = 0;
+		$current_slots_total = 0;
+	} elsif(m|<name>(.*?)\@(.*?)</name>|) {
+		$current_host = $2;
+		$current_queue_name = $1;
+	} elsif(m|</Queue-List>|) {
+		$qname_to_obj->{$current_queue_name}->{"type"} = $current_queue_type;
+		if($current_queue_state =~ m|[uds]|i) {
+			$qname_to_obj->{$current_queue_name}->{"slots_error"} += $current_slots_total;
+			$qname_to_obj->{$current_queue_name}->{"slots_total"} += $current_slots_total;
+			$qname_to_obj->{$current_queue_name}->{"okjobs"} += 0;
+		} else {
+			$qname_to_obj->{$current_queue_name}->{"slots_used"} += $current_slots_used;
+			$qname_to_obj->{$current_queue_name}->{"slots_resv"} += $current_slots_resv;
+			$qname_to_obj->{$current_queue_name}->{"slots_total"} += $current_slots_total;
+			$qname_to_obj->{$current_queue_name}->{"slots_total_avail"} += $current_slots_total;
+			my $available_slots = int(($current_slots_total - $current_slots_used - $current_slots_resv) / $param_slots);
+			my $njobs = int($current_mem_req / $param_memory);
+			print "DR: $njobs / $available_slots\n" if($debug);
+			if($njobs > $available_slots) { $njobs = $available_slots; }
+			$qname_to_obj->{$current_queue_name}->{"okjobs"} += $njobs;
+		}
+		$current_host = undef;
+		$current_queue_name = undef;
+		$current_queue_type = undef;
+		$current_queue_state = undef;
+		$current_mem_req = undef;
+		$current_slots_used = 0;
+		$current_slots_resv = 0;
+		$current_slots_total = 0;
+	} elsif(m|<slots_used>(\d+)</slots_used>|) {
+		$current_slots_used = $1;
+	} elsif(m|<slots_resv>(\d+)</slots_resv>|) {
+		$current_slots_resv = $1;
+	} elsif(m|<slots_total>(\d+)</slots_total>|) {
+		$current_slots_total = $1;
+	} elsif(m|<qtype>(.*?)</qtype>|) {
+		$current_queue_type = $1;
+	} elsif(m|<state>(.*?)</state>|) {
+		$current_queue_state = $1;
+	} elsif(m|<resource\s+name="h_vmem"\s+type=".*?">([\d\.]+)(\w*)</resource>|) {
+		$current_mem_req = $1;
+		my $sfx = $2;
+		$current_mem_req /= 1000.0 if($sfx =~ m|m|i);
+		$current_mem_req /= 1000000.0 if($sfx =~ m|k|i);
+	}
+}
+
+print "                                                #slots              \n";
+print "Queue                          Used / Total (error)   \%used   Ready\n";
+print "-------------------------------------------------------------------\n";
+for my $qname(sort keys %$qname_to_obj) {
+	my $obj = $qname_to_obj->{$qname};
+	next if($obj->{"type"} eq 'I');
+	print sprintf("%-30s %4d / %4d  (%5d)  %5.1f%%  %5d\n", $qname, $obj->{"slots_used"}, $obj->{"slots_total"}, $obj->{"slots_error"}, $obj->{"slots_used"} * 100.0 / $obj->{"slots_total_avail"}, $obj->{"okjobs"});
+}
+
+=pod
+
+=head1 NAME
+
+qfree - Thin Grid Engine wrapper : show the free slots of queues
+
+=head1 SYNOPSIS
+
+qfree [-m MEMORY] [-s SLOTS]
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-m MEMORY>
+
+Specify the amount of memory (in gigabytes) required for new jobs.
+Please note that, unlike when specifying h_vmem to Grid Engine, the value here is not multiplied by the number of slots requested with the B<-s> option.
+
+=item B<-s SLOTS>
+
+Specify the number of slots required for new jobs.
+
+=back
+
+=head1 DESCRIPTION
+
+B<qfree> lists the number of used and free slots in Grid Engine queues.
+It also calculates the number of jobs that could be immediately executed for each queue,
+given the requested number of slots (B<-s>) and amount of memory (B<-m>) required. This
+is displayed in the final column ('B<Ready>'). The defaults are 1 slot and 8 GB.
+
+=cut

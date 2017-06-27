@@ -1,0 +1,52 @@
+.\"
+.de M		\" man page reference
+\\fI\\$1\\fR\\|(\\$2)\\$3
+..
+.\"
+.de URL
+\\$2 \(laURL: \\$1 \(ra\\$3
+..
+.if \n[.g] .mso www.tmac
+.\"
+.TH QFREE 1 "21 JUNE 2017" "qfree 1.10" "User Commands"
+.SH NAME
+qfree \- show the number of available slots in Grid Engine queues
+.SH SYNOPSIS
+.B qfree
+.RB [ "\-m \fImemory" ]
+.RB [ "\-s \fIslots" ]
+.SH DESCRIPTION
+This manual page documents \fBqfree\fP, a script that reformats the
+output of the Grid Engine command
+.M qstat 1 
+to list the number of jobs that could be immediately executed, in theory, given the requested number of slots and total amount of memory required. This is displayed in the final column (\[oq]Ready\[cq]).
+.SS Options
+.TP
+.B \-m \fImemory\fR
+Specify the amount of \fImemory\fR (in gigabytes) required for new jobs.
+.PP
+.RS
+Note that, unlike when specifying h_vmem to qsub, the value here is \fBnot\fR multipled by the number of slots
+requested with the \fB-s\fR option (i.e. specifiy the total job requirement here).
+.br
+The default is 8 GB.
+.RE
+.TP
+.B \-s \fIslots\fR
+Specify the number of \fIslots\fR required for new jobs.
+.br
+The default is 1 slot.
+.SH AUTHOR
+Ian Grant <ian.grant@kcl.ac.uk>.
+.br
+Slightly modified from TGEW: Tiny Grid Engine Wrapper <https://github.com/mkasa/TGEW>
+.SH REPORTING BUGS
+Report bugs to <ian.grant@kcl.ac.uk>.
+.SH COPYRIGHT
+Copyright \[co] 2017 Ian Grant, Rosalind Partners/King's College London.
+.br
+This is free software. You may redistribute copies of it under the terms of the
+.URL http://www.opensource.org/licenses/bsd-license.php "modified BSD license" .
+There is NO WARRANTY, to the extent permitted by law.
+.SH "SEE ALSO"
+.M qstat 1

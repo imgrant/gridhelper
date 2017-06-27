@@ -1,0 +1,865 @@
+#!/bin/bash
+#
+# qstatus will reformat the output of the qstat command by SGE.
+#
+# Version 1.0 - 2004-08-23 Initial release
+#                          This version supports SGE 5.x and 6.x
+#
+# Version 1.1 - 2005-09-06 Small update to shorten too long
+#                          jobnames in the middle, giving the
+#                          ability to see the last part of it
+#
+# Version 1.2 - 2006-02-10 Correction of some typos
+#
+# Version 1.3 - 2009-07-20 (Internal release with colored output by
+#                          group. Not in the official release,
+#                          available on request.)
+#
+# Version 1.4 - 2009-08-10 Switch -r to display relative dates.
+#                          Idea by Harvey Richardson.
+#
+# Version 1.5 - 2010-11-30 Switch -t to display array tasks.
+#                          Idea by Kristof Lebecki.
+#                          Machinename limited to short hostname.
+#
+# Version 1.5a- 2012-04-13 Removed [] suffix for non-array jobs if
+#                          -t was requested by the user.
+#
+# Version 1.6 - 2012-04-25 Rename to avoid clash with upstart and
+#                          fix for sge 8 and RedHat 5.
+#                          Dave Love
+#
+# Version 2.0 - 2017-06-21 Adapted for compatibility with Open Grid
+#                          Scheduler fork; changes to flags; changes to
+#                          time formatting; additional options for
+#                          sorting, grouping, and limiting job lists;
+#                          additional fields (memory).
+#                          Ian Grant
+#
+# Copyright (C) 2017 Ian Grant <ian.grant@kcl.ac.uk>
+# Copyright (C) 2010 Reuti, email: reuti@staff.uni-marburg.de
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+PGM_NAME="qstatus"
+PGM_VERSION="2.0"
+
+#
+# If there is an unrecoverable error: display a message and exit.
+#
+function printExit
+{
+    case $1 in
+        [iI]) echo INFO: "$2" >&2 ;;
+        [wW]) echo WARNING: "$2" >&2 ;;
+        [eE]) echo ERROR: "$2" ; exit 1 >&2 ;;
+           *) echo $1 >&2 ;;
+    esac
+}
+
+#
+# System dependent setups.
+#
+platform=`uname -s`
+case $platform in
+
+    SunOS) awk_command=/usr/xpg4/bin/awk ;;
+
+        *) awk_command=awk ;;
+
+esac
+awk_path=`which $awk_command`
+if [ ! -r "$awk_path" -o ! -x "$awk_path" ] ; then
+    printExit W "No executable awk program found."
+    printExit E "Please update the path to awk in \"status\" according to your installation."
+fi 
+
+#
+# First define some functions.
+#
+function usage
+{
+    cat <<-EOF
+Usage: $PGM_NAME [-h] [-u USER | -a] [-c] [-g] [-p] [-j STATE] [-m] [-n LIMIT]
+               [-t] [-s FIELD] [-r] [-i] [-y] [-v]
+
+See \`man $PGM_NAME' for more information.
+
+EOF
+    exit 2
+}
+
+
+function version
+{
+    cat <<-EOF
+$PGM_NAME $PGM_VERSION
+EOF
+    exit 2
+}
+
+#
+# Analyze the given parameters to the command.
+#
+while getopts acghij:lmn:prs:tu:vy options ; do
+    case $options in
+
+        a) CMDOPT_A="1" ;;  # Display jobs from all users
+
+        u) CMDOPT_U="1"     # Specific user(s) to list jobs for (comma-separated, defaults to current user)
+            userlist="$OPTARG" ;;
+
+        c) CMDOPT_C="1" ;;  # Display summary stats
+
+        g) CMDOPT_G="1" ;;  # Group by owner (only applicable with -a, negates -s, equivalent to '-s owner,remaining')
+
+        h) usage ;;         # Help
+
+        p) CMDOPT_P="1" ;;  # Include suspended jobs in list of running jobs
+
+        l) CMDOPT_L="1" ;;  # Don't list individual jobs (useful with -c)
+
+        j) CMDOPT_J="1"     # Types of jobs to list: r(unning, includes suspended with -p), w(aiting). Default is both (i.e. equivalent to '-j rw')
+            jobtypes="$OPTARG" ;;
+
+        m) CMDOPT_M="1" ;;  # Display machine name instead of queue
+
+        n) CMDOPT_N="1"     # Limit jobs lists to N results
+            joblimit="$OPTARG" ;;
+
+        t) CMDOPT_T="1" ;;  # Display relative times
+
+        s) CMDOPT_S="1"     # Sort order (one of none, job, owner, name, running, slots, priority, time (equivalent to elapsed desc, then remaining asc), elapsed, remaining; default is remaining (for running jobs) and none (for waiting jobs, which is equivalent to priority) unless -g (see above))
+            sort_request="$OPTARG" ;;
+
+        r) CMDOPT_R="1" ;;  # Reverse sort order (see above)
+
+        i) CMDOPT_I="1" ;;  # Append task ID to job name for array tasks (meaningless for non-array jobs)
+
+        y) CMDOPT_Y="1"     # Collapse array job tasks into single entry for waiting jobs (default is to show each task as a separate entry, implies -i, has no effect for running jobs)
+            CMDOPT_I="1" ;;
+
+        v) version ;;       # Display program version
+
+       \?) printExit E "Invalid option: -$OPTARG." ;;
+
+    esac
+done
+
+#
+# Shift the arguments up to the input without the option prefix "-".
+# This should be the user name.
+#
+shift $((OPTIND-1))
+
+#
+# Test, whether was a user specified.
+# Set whether to display owner column if -a or -u with multiple users
+#
+if [ -n "$CMDOPT_A" ] ; then
+    if [ -n "$CMDOPT_U" ] ; then
+        printExit E "You may only specify -a (all users) *or* -u (specific user(s)), but not both."
+    else
+        # Show jobs from all users, show owner column
+        myuser="*"
+        listuser="1"
+    fi
+else
+    if [ -n "$CMDOPT_U" ] ; then
+        myuser="$userlist"
+        if [[ $userlist == *","* ]] ; then
+            # Multiple users, show owner column
+            listuser="1"
+        fi
+    else
+        # Default to current user, unset -g (not applicable here, if it was set) and hide owner column
+        myuser="$USER"
+        unset CMDOPT_G
+        unset listuser
+    fi
+fi
+
+#
+# Range of selected jobs to be included in running jobs.
+#
+if [ -n "$CMDOPT_P" ] ; then
+    jobrange="rs"
+else
+    jobrange="r"
+fi
+
+#
+# If a limit was specified for the job lists, check it's a valid integer
+#
+if [ -n "$CMDOPT_N" ] ; then
+    if [[ $joblimit =~ ^[0-9]+$ ]] ; then
+        limit_command=" | tail -n $joblimit"
+    else
+        printExit E "'$joblimit' is not a valid integer for the -n (job lists limit) parameter."
+    fi
+else
+    limit_command=""
+fi
+    
+#
+# Default to listing both running and waiting jobs if -j is not specified
+#
+if [ -z "$CMDOPT_J" ] ; then
+    jobtypes="rw"
+fi
+
+#
+# Collapse array jobs in waiting list?
+#
+if [ -n "$CMDOPT_Y" ] ; then
+    grouping=""
+else
+    grouping="-g d"
+fi
+
+#
+# Get the version of the installed SGE.
+#
+version=`qstat -help 2>&1 | head -1 | cut -f 2 -d " "`
+case $version in
+
+    5*) qstat_running='qstat -u "${myuser:-*}" -s "$jobrange" -r'
+        qstat_waiting='qstat -u "${myuser:-*}" -g d -s p -r'
+        running_in_column="all"
+        ;;
+
+    6*|8*|2011*) qstat_running='qstat -u "${myuser:-*}" -g t -s "$jobrange" -r'
+        qstat_waiting='qstat -u "${myuser:-*}" ${grouping} -s p -r'
+        if [ -n "$CMDOPT_M" ] ; then
+            running_in_column="machine"
+        else
+            running_in_column="queue"
+        fi
+        ;;
+
+     *) printExit E "This version of SGE ($version) is not supported."
+        ;;
+
+esac
+
+#
+# Assemble the sort commands as requested.
+#
+if [ -n "$CMDOPT_G" ] ; then
+    if [ -n "$CMDOPT_S" ] ; then
+        printExit E "You can't use the -g (group) switch together with the -s (sort) parameter."
+    else
+        sort_request="owner,remaining"
+        # Show the owner column if -g was specified
+        listuser="1"
+    fi
+else
+    if [ -z "$CMDOPT_S" ] ; then
+        sort_request="remaining"
+    fi
+fi
+
+#
+# Reverse the sort order?
+#
+if [ -n "$CMDOPT_R" ] ; then
+    reverse_sort=" -r "
+else
+    reverse_sort=""
+fi
+
+sort_command=`$awk_command -v sort_request="$sort_request" -v listuser="$listuser" -v reverse_sort="$reverse_sort" -v relative="$relative" '
+
+        function is_in(diamond, rough, x, y) {
+            for (x in rough) y[rough[x]]
+            return diamond in y
+        } 
+
+        BEGIN {
+                split("running elapsed remaining", running_only_fields, " ")
+
+                field_position["priority"]=" -k 1,1nr"
+                field_position["time"]=" -k 2,2nr -k 3,3n"
+                field_position["elapsed"]=" -k 2,2nr"      # unix timestamp of submit time in case of waiting jobs
+                field_position["remaining"]=" -k 3,3n"    # or requested in case of waiting jobs
+
+                field_position["job"]=" -k 4,4"
+                field_position["slots"]=" -k 5,5nr"
+                field_position["memory"]=" -k 6,6r"
+                field_position["name"]=" -k 7,7"
+
+                if (listuser)
+                {
+                    field_position["owner"]=" -k 8,8"
+                    if (relative)
+                    {
+                        field_position["running"]=" -k 13,13"
+                    } else
+                    {
+                        field_position["running"]=" -k 19,19"
+                    }
+                } else
+                {
+                    if (relative)
+                    {
+                        field_position["running"]=" -k 12,12"
+                    } else
+                    {
+                        field_position["running"]=" -k 18,18"
+                    }
+                }
+                
+
+                sort_count=split(sort_request, sort_fields, ",")
+
+                for (field=1; field<=sort_count; field++)
+                {
+                    if (sort_fields[field]=="none")
+                    {
+                        sort_command_running=""
+                        sort_command_waiting=""
+                        if (sort_count>1)
+                            { printf "WARNING: Sort set to none, supersede all other column names given.\n" > "/dev/stderr" }
+                        break
+                    }
+
+                    if (sort_fields[field]=="owner" && ! listuser)
+                    {
+                        printf "WARNING: Sort by owner ignored, because owner not displayed.\n" > "/dev/stderr"
+                        continue
+                    }
+
+                    if (field_position[sort_fields[field]]=="")
+                        { printf "WARNING: Sort column name \""sort_fields[field]"\" ignored.\n" > "/dev/stderr" }
+                    else
+                    {
+                        sort_command_running=sort_command_running field_position[sort_fields[field]]
+                        if (!is_in(sort_fields[field], running_only_fields))
+                            { sort_command_waiting=sort_command_waiting field_position[sort_fields[field]] }
+                    }
+                }
+
+                if (sort_command_running)
+                    { sort_command_running="sort -b " reverse_sort sort_command_running }
+                else
+                    { sort_command_running="cat" }
+                if (sort_command_waiting)
+                    { sort_command_waiting="sort -b " reverse_sort sort_command_waiting }
+                else
+                    { sort_command_waiting="cat" }
+
+                print sort_command_running"|"sort_command_waiting } '`
+
+sort_command_running=${sort_command%|*}"| cut -f 4- -d ' ' $limit_command" 
+sort_command_waiting=${sort_command#*|}"| cut -f 4- -d ' ' $limit_command"
+
+## Used with strftime to get UTC.  Is there a better semi-portable way?
+#SGE_ARCH=`$SGE_ROOT/util/arch`
+#utc_offset=`$SGE_ROOT/utilbin/$SGE_ARCH/now -utcoffset`    # Open Grid Scheduler fork version of this utility doesn't support -utcoffset flag
+utc_offset=$(date +%::z | sed -e 's/\+//' | awk -F ':' '{print $1*3600 + $2*60 + $3}')
+
+
+#
+# Now do it.
+#
+
+#
+# First the already running jobs.
+#
+if [[ $jobtypes == *"r"* ]] ; then
+
+    eval $qstat_running | $awk_command -v utc_offset=$utc_offset '
+
+        BEGIN { firstrun=1
+                ignore=0
+                #actual_time=systime()  # not portable
+                cmd="perl -e \"print time();\""
+                cmd | getline
+                actual_time=$1
+                close(cmd)
+              }
+
+        function printy()
+        {
+            strlen=length(jobname)
+            if ( strlen > 25)
+                { newjobname=substr(jobname,1,11)"..."substr(jobname,strlen-10) }
+            else
+                { newjobname=substr(jobname,1,25) }
+
+            if (ext)
+                { ext="("ext")" }
+
+            if (listuser)
+            {
+                printf("%f %d %d %7s   %4d  %4dG   %-25s   %-10s  %-20s  %-20s  %-20s %s\n",
+                        priority, running_seconds, remaining_seconds, jobid, procs, total_mem, newjobname, 
+                        length(owner)>10 ? substr(owner,1,9) ">" : owner,
+                        starttime, endtime, masternode, ext) | sort_command
+            }
+            else
+            {
+                printf("%f %d %d %7s   %4d  %4dG   %-25s   %-20s  %-20s  %-20s %s\n",
+                        priority, running_seconds, remaining_seconds, jobid, procs, total_mem, newjobname, starttime, endtime, masternode, ext) | sort_command
+            }
+        }
+
+        /MASTER *[0-9]*$/ { if (firstrun)
+                                {
+                                    if (listing)
+                                    {
+                                        if (display_task) 
+                                        {
+                                            name_header="[Task ID]"
+                                        }
+                                        else
+                                        {
+                                            name_header="         "
+                                        }
+
+                                        if (listuser)
+                                        {
+                                            printf "Running jobs:\n"
+                                            printf "Job ID    Slots  Mem.   Name%s               Owner       Start/elapsed time    End/remaining time    Running in\n", name_header
+                                            printf "----------------------------------------------------------------------------------------------------------------------\n"
+                                        }
+                                        else
+                                        {
+                                            printf "Running jobs for user: %s\n", user
+                                            printf "Job ID    Slots  Mem.   Name%s               Start/elapsed time    End/remaining time    Running in\n", name_header
+                                            printf "----------------------------------------------------------------------------------------------------------\n"
+                                        }
+                                    }
+  
+                                    firstrun=0
+                                }
+                                else
+                                {
+                                    if (listing)
+                                        { printy() }
+                                }
+    
+                                ignore=0
+                                jobid=$1
+                                priority=$2
+                                owner=$4
+                                procs=1
+                                pe=none
+                                start_time=mktime(substr($6,7,4)" "substr($6,1,2)" "substr($6,4,2)" " \
+                                                                         substr($7,1,2)" "substr($7,4,2)" "substr($7,7,2))
+                                starttime=strftime("%a %d %b %I:%M %p", start_time)
+                                running_seconds=actual_time - start_time
+                                starttime_days=int(running_seconds / 86400)
+                                starttime_time=strftime("%T", (running_seconds % 86400) - utc_offset)
+                                if (relative) {
+                                  starttime=sprintf("%3dd %s", starttime_days, starttime_time)
+                                }
+                                task=$10
+ 
+                                if (running_in_column=="all")
+                                    { masternode=$8 }
+                                else if (running_in_column=="machine")
+                                    {
+                                      masternode=substr($8, index($8, "@")+1)
+                                      hostname_separator=index(masternode, ".")
+                                      if (hostname_separator)
+                                          { masternode=substr(masternode, 1, hostname_separator-1) }
+                                    }
+                                else if (running_in_column=="queue")
+                                    { masternode=substr($8, 1, index($8, "@")-1) }
+                                else
+                                    { masternode="Unknown" }
+ 
+                                ext=match($5, "d") ? "stalled" : ""
+                                if (match($5, "s"))
+                                {
+                                    if (ext)
+                                        { ext=ext", suspended" }
+                                    else
+                                        { ext="suspended"}
+                                }
+                                if (match($5, "S"))
+                                {
+                                    if (ext)
+                                        { ext=ext", suspended by queue" }
+                                    else
+                                        { ext="suspended by queue"}
+                                }
+                                
+ 
+                                if (listuser)
+                                {
+                                    serial[owner]++
+                                    parallel[owner]+=0
+                                    serial_slots[owner]+=procs
+                                    parallel_slots[owner]+=0
+                                }
+                                else
+                                {
+                                    serial[user]++
+                                    parallel[user]+=0
+                                    serial_slots[user]+=procs
+                                    parallel_slots[user]+=0
+                                }
+                             }
+
+        /SLAVE *[0-9]*$/     { ignore=1 }
+
+        ignore               { next }
+
+        /^ *Full jobname:/   {
+                               jobname=$3
+                               if (display_task && task != "")
+                                   { jobname=jobname"["task"]" }
+                             }
+
+        /^ *Granted PE:/     {  pe_procs=$4
+                                pe=$3
+                                if (listuser)
+                                {
+                                    serial[owner]--
+                                    parallel[owner]++
+                                    serial_slots[owner]-=procs
+                                    parallel_slots[owner]+=pe_procs
+                                }
+                                else
+                                {
+                                    serial[user]--
+                                    parallel[user]++
+                                    serial_slots[user]-=procs
+                                    parallel_slots[user]+=pe_procs
+                                }
+                                procs=pe_procs
+                             }
+
+        /^ *(Hard Resources:)? *h_rt/ {
+                                    sub(/^.*h_rt=/, "")
+                                    h_rt=$1
+                                    endtime=strftime("%a %d %b %I:%M %p", start_time + h_rt)
+                                    remaining_seconds=h_rt-running_seconds
+                                    remaining_days=int(sqrt(remaining_seconds^2) / 86400)
+                                    remaining_time=strftime("%T", (sqrt(remaining_seconds^2) % 86400) - utc_offset)
+                                    if (remaining_seconds < 0)
+                                    {
+                                        remaining_days="-"remaining_days
+                                        if (ext)
+                                            { ext=ext", over time limit" }
+                                        else
+                                            { ext="over time limit"}
+                                    }
+                                    if (relative) {
+                                      endtime=sprintf("%3sd %s", remaining_days, remaining_time)                                                        
+                                    }
+                                 }
+
+        /^ *(Hard Resources:)? *h_vmem/ {
+
+                                total_bytes=gensub(/^.*\((([0-9]+|default))(\.000000)?\)/, "\\1", "1")
+                                # Strange qstat output -- total_bytes seems to be multiplied by 1,001?
+                                # e.g. a 1 slot job: h_vmem=2G (257955735797760.000000)
+                                # The large number is 2G*1001
+                                if (total_bytes=="default") {
+                                    # if h_vmem was not explicitly set, the line reads like: h_vmem=8G (default)
+                                    # in which case, parse it from h_vmem= and multiply by slots
+                                    per_slot_mem=gensub(/^.*h_vmem=([0-9]+)G \(default\)/, "\\1", "1")
+                                    total_mem=per_slot_mem*procs
+                                } else {
+                                    total_mem=total_bytes/1024/1024/1024/1001
+                                }
+                             }                                    
+
+        END { if (! firstrun)
+              {
+                  if (listing)
+                  {
+                      printy()
+                      close(sort_command)
+                      print ""
+                  }
+
+                  if (statistic)
+                  {
+                      printf("\n")
+                      printf("                                 Running #jobs / #slots\n")
+                      printf("Owner                   Serial         Parallel         Total\n")
+                      printf("-----------------------------------------------------------------\n")
+
+                      if (listuser)
+                      {
+                         user_sort="sort -k 1,1"
+                         for (owner in serial)
+                         {
+                             total_serial+=serial[owner]
+                             total_parallel+=parallel[owner]
+                             total_serial_slots+=serial_slots[owner]
+                             total_parallel_slots+=parallel_slots[owner]
+
+                             printf("%-17s  %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                    length(owner)>10 ? substr(owner,1,9) ">" : owner,
+                                    serial[owner], serial_slots[owner], parallel[owner], parallel_slots[owner],
+                                    serial[owner]+parallel[owner], serial_slots[owner]+parallel_slots[owner]) | user_sort
+                         }
+                         close(user_sort)
+
+                         printf("-----------------------------------------------------------------\n")
+                         printf("Sum                %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                total_serial, total_serial_slots, total_parallel, total_parallel_slots,
+                                total_serial+total_parallel, total_serial_slots+total_parallel_slots)
+                      }
+                      else
+                      {
+                         printf("%-17s  %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                length(user)>10 ? substr(user,1,9) ">" : user,
+                                serial[user], serial_slots[user], parallel[user], parallel_slots[user],
+                                serial[user]+parallel[user], serial_slots[user]+parallel_slots[user])
+                      }
+                      print ""
+                  }
+
+              }
+            } ' user="$myuser" statistic="$CMDOPT_C" running_in_column="$running_in_column" \
+                listuser="$listuser" sort_command="$sort_command_running" listing="$((1-${CMDOPT_L:-0}))" \
+                relative="$CMDOPT_T" display_task="$CMDOPT_I" 
+fi
+
+
+#
+# Now the waiting jobs.
+#
+if [[ $jobtypes == *"w"* ]] ; then
+
+    eval $qstat_waiting | $awk_command -v utc_offset=$utc_offset '
+
+        BEGIN { firstrun=1
+                #actual_time=systime()  # not portable
+                cmd="perl -e \"print time();\""
+                cmd | getline
+                actual_time=$1
+                close(cmd)
+              }
+
+        function printy()
+        {
+            strlen=length(jobname)
+            if ( strlen > 25)
+                { newjobname=substr(jobname,1,11)"..."substr(jobname,strlen-10) }
+            else
+                { newjobname=substr(jobname,1,25) }
+
+            if (ext)
+                { ext="("ext")" }
+
+            if (listuser)
+            {
+                printf("%f %d %d %7s   %4d  %4dG   %-25s   %-10s  %-20s  %-14s  %s\n",
+                        priority, submittimestamp, requested_seconds, jobid, procs, req_mem, newjobname, 
+                        length(owner)>10 ? substr(owner,1,9) ">" : owner,
+                        submittime, requested_time, ext) | sort_command
+            }
+            else
+            {
+                printf("%f %d %d %7s   %4d  %4dG   %-25s   %-20s  %-14s  %s\n",
+                        priority, submittimestamp, requested_seconds, jobid, procs, req_mem, newjobname, submittime, requested_time, ext) | sort_command
+            }
+        }
+
+        /^ *[0-9]+ */        { if (firstrun)
+                               {
+                                   if (listing)
+                                   {
+                                        if (display_task) 
+                                        {
+                                            name_header="[Task ID]"
+                                        }
+                                        else
+                                        {
+                                            name_header="         "
+                                        }
+
+                                        if (listuser)
+                                        {
+                                            printf "Waiting jobs:\n"
+                                            printf "Job ID    Slots  Mem.   Name%s               Owner       Submitted              Requested time\n", name_header
+                                            printf "-----------------------------------------------------------------------------------------------------\n"
+                                        }
+                                        else
+                                        {
+                                            printf "Waiting jobs for user: %s\n", user
+                                            printf "Job ID    Slots  Mem.   Name%s               Submitted              Requested time\n", name_header
+                                            printf "-----------------------------------------------------------------------------------------\n"
+                                        }
+                                   }
+
+                                   firstrun=0
+                               }
+                               else
+                               {
+                                   if (listing)
+                                       { printy() }
+                               }
+  
+                               jobid=$1
+                               priority=$2
+                               owner=$4
+                               procs=$8
+                               submit_time=mktime(substr($6,7,4)" "substr($6,1,2)" "substr($6,4,2)" " \
+                                                                        substr($7,1,2)" "substr($7,4,2)" "substr($7,7,2))
+                               submittime=strftime("%a %d %b %I:%M %p", submit_time)
+                               waiting_seconds=actual_time - submit_time
+                               waittime_days=int(waiting_seconds / 86400)
+                               waittime_time=strftime("%T", (waiting_seconds % 86400) - utc_offset)
+                               if (relative) {
+                                 submittime=sprintf("%3sd %s", "-"waittime_days, waittime_time)
+                               }
+
+                               task=$9
+                               total_tasks=1
+                               if (task ~ /,/)
+                               {
+                                   total_tasks=split(task, task_ids, ",")
+                               }
+                               else if (task ~ /:/)
+                               {
+                                   split(task, task_size, ":")
+                                   split(task_size[1], task_ids, "-")
+                                   total_tasks=(task_ids[2]-task_ids[1]+1)/task_size[2]
+                               }
+                               procs=total_tasks*procs
+
+                               ext=match($5, "E") ? "error" : ""
+                               if (match($5, "h"))
+                               {
+                                   if (ext)
+                                       { ext=ext", hold" }
+                                   else
+                                       { ext="hold"}
+                               }                               
+
+                               if (listuser)
+                               {
+                                   serial[owner]+=total_tasks
+                                   parallel[owner]+=0
+                                   serial_slots[owner]+=procs
+                                   parallel_slots[owner]+=0
+                               }
+                               else
+                               {
+                                   serial[user]+=total_tasks
+                                   parallel[user]+=0
+                                   serial_slots[user]+=procs
+                                   parallel_slots[user]+=0
+                               }
+                             }
+
+        /^ *Full jobname:/   {
+                               jobname=$3
+                               if (display_task && task != "")
+                                   { jobname=jobname"["task"]" }
+                             }
+
+        /^ *Requested PE:/   {  procs=$4*total_tasks
+                                if (listuser)
+                                {
+                                    serial[owner]-=total_tasks
+                                    parallel[owner]+=total_tasks
+                                    serial_slots[owner]-=procs
+                                    parallel_slots[owner]+=procs
+                                }
+                                else
+                                {
+                                    serial[user]-=total_tasks
+                                    parallel[user]+=total_tasks
+                                    serial_slots[user]-=procs
+                                    parallel_slots[user]+=procs
+                                }
+                            }
+
+        /^ *(Hard Resources:)? *h_rt/ {
+                                sub(/^.*h_rt=/, "")
+                                h_rt=$1                                
+                                req_days=int(h_rt / 86400)
+                                req_time=strftime("%T", (h_rt % 86400) - utc_offset)                                
+                                requested_time=sprintf("%3dd %s", req_days, req_time)
+                             }
+
+        /^ *(Hard Resources:)? *h_vmem/ {
+                                total_bytes=gensub(/^.*\(([0-9]+)\.000000\)/, "\\1", "1")
+                                # Strange qstat output -- total_bytes seems to be multiplied by 1,001?
+                                # e.g. a 1 slot job: h_vmem=2G (257955735797760.000000)
+                                # The large number is 2G*1001
+                                req_mem=total_bytes/1024/1024/1024/1001
+                             }                                                         
+
+
+        END { if (! firstrun)
+              {
+                    if (listing)
+                    {
+                        printy()
+                        close(sort_command)
+                        print ""
+                    }
+
+                  if (statistic)
+                  {
+                      printf("\n")
+                      printf("                                 Waiting #jobs / #slots\n")
+                      printf("Owner                   Serial         Parallel         Total\n")
+                      printf("-----------------------------------------------------------------\n")
+
+                      if (listuser)
+                      {
+                         user_sort="sort -k 1,1"
+                         for (owner in serial)
+                         {
+                             total_serial+=serial[owner]
+                             total_parallel+=parallel[owner]
+                             total_serial_slots+=serial_slots[owner]
+                             total_parallel_slots+=parallel_slots[owner]
+
+                             printf("%-17s  %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                    length(owner)>10 ? substr(owner,1,9) ">" : owner,
+                                    serial[owner], serial_slots[owner], parallel[owner], parallel_slots[owner],
+                                    serial[owner]+parallel[owner], serial_slots[owner]+parallel_slots[owner]) | user_sort
+                         }
+                         close(user_sort)
+
+                         printf("-----------------------------------------------------------------\n")
+                         printf("Sum                %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                total_serial, total_serial_slots, total_parallel, total_parallel_slots,
+                                total_serial+total_parallel, total_serial_slots+total_parallel_slots)
+                      }
+                      else
+                      {
+                         printf("%-17s  %5d / %5d   %5d / %5d   %5d / %5d\n",
+                                length(user)>10 ? substr(user,1,9) ">" : user,
+                                serial[user], serial_slots[user], parallel[user], parallel_slots[user],
+                                serial[user]+parallel[user], serial_slots[user]+parallel_slots[user])
+                      }
+                      print ""
+                  }
+
+              }
+            } ' user="$myuser" statistic="$CMDOPT_C" \
+                listuser="$listuser" sort_command="$sort_command_waiting" listing="$((1-${CMDOPT_L:-0}))" \
+                relative="$CMDOPT_T" display_task="$CMDOPT_I"
+fi
+
+
+#
+# So, that's all
+#
+exit 0

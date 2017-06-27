@@ -1,0 +1,106 @@
+.\"
+.de M		\" man page reference
+\\fI\\$1\\fR\\|(\\$2)\\$3
+..
+.\"
+.de URL
+\\$2 \(laURL: \\$1 \(ra\\$3
+..
+.if \n[.g] .mso www.tmac
+.\"
+.TH QSTATUS 1 "21 JUNE 2017" "qstatus 2.0" "User Commands"
+.SH NAME
+qstatus \- show the status of Grid Engine jobs
+.SH SYNOPSIS
+.B qstatus
+.RB [ "\-acghilmprtvy" ]
+.RB [ "\-j \fIjob_states" ]
+.RB [ "\-n \fIlimit" ]
+.RB [ "\-s \fIsort_field\fR,..." ]
+.RB [ "\-u \fIuser\fR,..." ]
+.SH DESCRIPTION
+This manual page documents \fBqstatus\fP, a script to reformat the
+output of the Grid Engine command
+.M qstat 1 .
+.PP
+The reformatted list is by default limited to the actual user account. This can be changed to request a job
+list of any user by supplying the username \fIuser\fR as an argument to the \fB-u\fR option, or requesting an output for all users with the \fB\-a\fR switch (see below).
+.SS Options
+.TP
+.B \-a
+Display the jobs of all users. May not be used when one or more
+dedicated users are specified (with \fB-u\fR).
+.TP
+.B \-u \fIuser\fR,...
+Display jobs for the given \fIuser\fRs. Default is equivalent to \[oq]\fB-u\fR $USER\[cq].
+.TP
+.B \-c
+Display statistics, summarised by user.
+.TP
+.B \-g
+Group output by owner. Only applicable if the owner is listed,
+either by the \fB\-a\fR switch, or via multiple users listed with the \fB-u\fR option.
+.br
+Equivalent to \[oq]\fB\-s\fR \fBowner\fR,\fBremaining\fR\[cq], and overrides \fB-s\fR.
+.TP
+.B \-h
+Print help.
+.TP
+.B \-p
+Include jobs which are suspended in the list of running jobs.
+.TP
+.B \-l
+Suppress the output of the list of jobs. Maybe useful in case
+you are only interested in the summary with the \fB\-c\fR switch.
+.TP
+.B \-u \fIj|w\fR,...
+Types of jobs to list: r(unning, including suspended with \fB-p\fR), w(aiting). Default is both, which is equivalent to \[oq]\fB\-j\fR \fBrw\fR\[cq].
+.TP
+.B \-m
+Display the machine instead of the name of the queue the job is
+running in under the column \[oq]Running in\[cq].
+.TP
+.B \-n \fIlimit\fR
+Show only the top \fIlimit\fR results for the job listings. 
+.TP
+.B \-t
+Show the start/end times as relative durations (e.g. HH:MM:SS elapsed/remaining) instead of absolute date-times.
+.TP
+.B \-s \fIsort_field\fR,...
+Sort the output according to the given columns.
+.PP
+.RS
+\fIsort_field\fR can be one of:
+\fBjob\fR, \fBowner\fR, \fBname\fR, \fBrunning\fR, \fBslots\fR, \fBpriority\fR, \fBelapsed\fR, \fBremaining\fR, or \fBtime\fR (equivalent to \fBelapsed\fR descending, then \fBremaining\fR ascending).
+.PP
+The default is \fBremaining\fR for running jobs and \fBpriority\fR for waiting jobs, unless \fB-g\fR is specified.
+.RE
+.TP
+.B \-r
+Reverse the sort order.
+.TP
+.B \-i
+Append task ID to the jobname for array tasks. This option has no effect for non-array jobs.
+.TP
+.B \-y
+Collapse array jobs into a single entry in the waiting jobs list (has no effect for running jobs). Implies \fB-i\fR
+.TP
+.B \-v
+Report the program version.
+.SH AUTHOR
+Ian Grant <ian.grant@kcl.ac.uk>.
+.br
+Adapted from original code supplied with Son of Grid Engine (SGE) by Reuti
+.SH REPORTING BUGS
+Report bugs to <ian.grant@kcl.ac.uk>.
+.SH COPYRIGHT
+Copyright \[co] 2017 Ian Grant, Rosalind Partners/King's College London, \[co] 2010 Philipps-University of Marburg.
+.br
+This is free software. You may redistribute copies of it under the terms of the
+.URL http://www.gnu.org/licenses/gpl.html "GNU General Public License" .
+There is NO WARRANTY, to the extent permitted by law.
+.SH "SEE ALSO"
+.M qstat 1
+.SH BUGS
+Originally written for the Son of Grid Engine (SGE) fork of Grid Engine, the code has now been
+adapted for the Open Grid Scheduler (OGS/Grid Engine 2011.11) fork; may no longer be compatible with SGE.
