@@ -95,7 +95,8 @@ print "-------------------------------------------------------------------\n";
 for my $qname(sort keys %$qname_to_obj) {
 	my $obj = $qname_to_obj->{$qname};
 	next if($obj->{"type"} eq 'I');
-	print sprintf("%-30s %4d / %4d  (%5d)  %5.1f%%  %5d\n", $qname, $obj->{"slots_used"}, $obj->{"slots_total"}, $obj->{"slots_error"}, $obj->{"slots_used"} * 100.0 / $obj->{"slots_total_avail"}, $obj->{"okjobs"});
+	my $div = ($obj->{"slots_total_avail"} > 0) ? $obj->{"slots_total_avail"} : 1;
+	print sprintf("%-30s %4d / %4d  (%5d)  %5.1f%%  %5d\n", $qname, $obj->{"slots_used"}, $obj->{"slots_total"}, $obj->{"slots_error"}, $obj->{"slots_used"} * 100.0 / $div, $obj->{"okjobs"});
 }
 
 =pod
