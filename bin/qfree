@@ -3,7 +3,7 @@
 use strict;
 use Getopt::Long;
 use Pod::Usage;
-use constant VERSION_STRING => "1.10";
+use constant VERSION_STRING => "1.11";
 
 my $debug = 0;
 my $flag_help = 0;
