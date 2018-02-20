@@ -2,41 +2,44 @@
 #
 # qstatus will reformat the output of the qstat command by SGE.
 #
-# Version 1.0 - 2004-08-23 Initial release
-#                          This version supports SGE 5.x and 6.x
+# Version 1.0  - 2004-08-23 Initial release
+#                           This version supports SGE 5.x and 6.x
 #
-# Version 1.1 - 2005-09-06 Small update to shorten too long
-#                          jobnames in the middle, giving the
-#                          ability to see the last part of it
+# Version 1.1  - 2005-09-06 Small update to shorten too long
+#                           jobnames in the middle, giving the
+#                           ability to see the last part of it
 #
-# Version 1.2 - 2006-02-10 Correction of some typos
+# Version 1.2  - 2006-02-10 Correction of some typos
 #
-# Version 1.3 - 2009-07-20 (Internal release with colored output by
-#                          group. Not in the official release,
-#                          available on request.)
+# Version 1.3  - 2009-07-20 (Internal release with colored output by
+#                           group. Not in the official release,
+#                           available on request.)
 #
-# Version 1.4 - 2009-08-10 Switch -r to display relative dates.
-#                          Idea by Harvey Richardson.
+# Version 1.4  - 2009-08-10 Switch -r to display relative dates.
+#                           Idea by Harvey Richardson.
 #
-# Version 1.5 - 2010-11-30 Switch -t to display array tasks.
-#                          Idea by Kristof Lebecki.
-#                          Machinename limited to short hostname.
+# Version 1.5  - 2010-11-30 Switch -t to display array tasks.
+#                           Idea by Kristof Lebecki.
+#                           Machinename limited to short hostname.
 #
-# Version 1.5a- 2012-04-13 Removed [] suffix for non-array jobs if
-#                          -t was requested by the user.
+# Version 1.5a - 2012-04-13 Removed [] suffix for non-array jobs if
+#                           -t was requested by the user.
 #
-# Version 1.6 - 2012-04-25 Rename to avoid clash with upstart and
-#                          fix for sge 8 and RedHat 5.
-#                          Dave Love
+# Version 1.6  - 2012-04-25 Rename to avoid clash with upstart and
+#                           fix for sge 8 and RedHat 5.
+#                           Dave Love
 #
-# Version 2.0 - 2017-06-21 Adapted for compatibility with Open Grid
-#                          Scheduler fork; changes to flags; changes to
-#                          time formatting; additional options for
-#                          sorting, grouping, and limiting job lists;
-#                          additional fields (memory).
-#                          Ian Grant
+# Version 2.0  - 2017-06-21 Adapted for compatibility with Open Grid
+#                           Scheduler fork; changes to flags; changes to
+#                           time formatting; additional options for
+#                           sorting, grouping, and limiting job lists;
+#                           additional fields (memory).
+#                           Ian Grant
 #
-# Copyright (C) 2017 Ian Grant <ian.grant@kcl.ac.uk>
+# Version 2.01 - 2018-02-20 Fix for UTC timezone offset in strftime
+#                           Ian Grant
+#
+# Copyright (C) 2017,2018 Ian Grant <ian.grant@kcl.ac.uk>
 # Copyright (C) 2010 Reuti, email: reuti@staff.uni-marburg.de
 #
 # This program is free software; you can redistribute it and/or modify
@@ -85,7 +88,7 @@ awk_path=`which $awk_command`
 if [ ! -r "$awk_path" -o ! -x "$awk_path" ] ; then
     printExit W "No executable awk program found."
     printExit E "Please update the path to awk in \"status\" according to your installation."
-fi 
+fi
 
 #
 # First define some functions.
@@ -213,7 +216,7 @@ if [ -n "$CMDOPT_N" ] ; then
 else
     limit_command=""
 fi
-    
+
 #
 # Default to listing both running and waiting jobs if -j is not specified
 #
@@ -286,7 +289,7 @@ sort_command=`$awk_command -v sort_request="$sort_request" -v listuser="$listuse
         function is_in(diamond, rough, x, y) {
             for (x in rough) y[rough[x]]
             return diamond in y
-        } 
+        }
 
         BEGIN {
                 split("running elapsed remaining", running_only_fields, " ")
@@ -321,7 +324,7 @@ sort_command=`$awk_command -v sort_request="$sort_request" -v listuser="$listuse
                         field_position["running"]=" -k 18,18"
                     }
                 }
-                
+
 
                 sort_count=split(sort_request, sort_fields, ",")
 
@@ -363,7 +366,7 @@ sort_command=`$awk_command -v sort_request="$sort_request" -v listuser="$listuse
 
                 print sort_command_running"|"sort_command_waiting } '`
 
-sort_command_running=${sort_command%|*}"| cut -f 4- -d ' ' $limit_command" 
+sort_command_running=${sort_command%|*}"| cut -f 4- -d ' ' $limit_command"
 sort_command_waiting=${sort_command#*|}"| cut -f 4- -d ' ' $limit_command"
 
 ## Used with strftime to get UTC.  Is there a better semi-portable way?
@@ -406,7 +409,7 @@ if [[ $jobtypes == *"r"* ]] ; then
             if (listuser)
             {
                 printf("%f %d %d %7s   %4d  %4dG   %-25s   %-10s  %-20s  %-20s  %-20s %s\n",
-                        priority, running_seconds, remaining_seconds, jobid, procs, total_mem, newjobname, 
+                        priority, running_seconds, remaining_seconds, jobid, procs, total_mem, newjobname,
                         length(owner)>10 ? substr(owner,1,9) ">" : owner,
                         starttime, endtime, masternode, ext) | sort_command
             }
@@ -421,7 +424,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                 {
                                     if (listing)
                                     {
-                                        if (display_task) 
+                                        if (display_task)
                                         {
                                             name_header="[Task ID]"
                                         }
@@ -443,7 +446,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                             printf "----------------------------------------------------------------------------------------------------------\n"
                                         }
                                     }
-  
+
                                     firstrun=0
                                 }
                                 else
@@ -451,7 +454,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                     if (listing)
                                         { printy() }
                                 }
-    
+
                                 ignore=0
                                 jobid=$1
                                 priority=$2
@@ -460,15 +463,15 @@ if [[ $jobtypes == *"r"* ]] ; then
                                 pe=none
                                 start_time=mktime(substr($6,7,4)" "substr($6,1,2)" "substr($6,4,2)" " \
                                                                          substr($7,1,2)" "substr($7,4,2)" "substr($7,7,2))
-                                starttime=strftime("%a %d %b %I:%M %p", start_time)
+                                starttime=strftime("%a %d %b %I:%M %p", start_time, 1)
                                 running_seconds=actual_time - start_time
                                 starttime_days=int(running_seconds / 86400)
-                                starttime_time=strftime("%T", (running_seconds % 86400) - utc_offset)
+                                starttime_time=strftime("%T", (running_seconds % 86400) - utc_offset, 1)
                                 if (relative) {
                                   starttime=sprintf("%3dd %s", starttime_days, starttime_time)
                                 }
                                 task=$10
- 
+
                                 if (running_in_column=="all")
                                     { masternode=$8 }
                                 else if (running_in_column=="machine")
@@ -482,7 +485,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                     { masternode=substr($8, 1, index($8, "@")-1) }
                                 else
                                     { masternode="Unknown" }
- 
+
                                 ext=match($5, "d") ? "stalled" : ""
                                 if (match($5, "s"))
                                 {
@@ -498,8 +501,8 @@ if [[ $jobtypes == *"r"* ]] ; then
                                     else
                                         { ext="suspended by queue"}
                                 }
-                                
- 
+
+
                                 if (listuser)
                                 {
                                     serial[owner]++
@@ -548,10 +551,10 @@ if [[ $jobtypes == *"r"* ]] ; then
         /^ *(Hard Resources:)? *h_rt/ {
                                     sub(/^.*h_rt=/, "")
                                     h_rt=$1
-                                    endtime=strftime("%a %d %b %I:%M %p", start_time + h_rt)
+                                    endtime=strftime("%a %d %b %I:%M %p", start_time + h_rt, 1)
                                     remaining_seconds=h_rt-running_seconds
                                     remaining_days=int(sqrt(remaining_seconds^2) / 86400)
-                                    remaining_time=strftime("%T", (sqrt(remaining_seconds^2) % 86400) - utc_offset)
+                                    remaining_time=strftime("%T", (sqrt(remaining_seconds^2) % 86400) - utc_offset, 1)
                                     if (remaining_seconds < 0)
                                     {
                                         remaining_days="-"remaining_days
@@ -561,7 +564,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                             { ext="over time limit"}
                                     }
                                     if (relative) {
-                                      endtime=sprintf("%3sd %s", remaining_days, remaining_time)                                                        
+                                      endtime=sprintf("%3sd %s", remaining_days, remaining_time)
                                     }
                                  }
 
@@ -579,7 +582,7 @@ if [[ $jobtypes == *"r"* ]] ; then
                                 } else {
                                     total_mem=total_bytes/1024/1024/1024/1001
                                 }
-                             }                                    
+                             }
 
         END { if (! firstrun)
               {
@@ -632,7 +635,7 @@ if [[ $jobtypes == *"r"* ]] ; then
               }
             } ' user="$myuser" statistic="$CMDOPT_C" running_in_column="$running_in_column" \
                 listuser="$listuser" sort_command="$sort_command_running" listing="$((1-${CMDOPT_L:-0}))" \
-                relative="$CMDOPT_T" display_task="$CMDOPT_I" 
+                relative="$CMDOPT_T" display_task="$CMDOPT_I"
 fi
 
 
@@ -665,7 +668,7 @@ if [[ $jobtypes == *"w"* ]] ; then
             if (listuser)
             {
                 printf("%f %d %d %7s   %4d  %4dG   %-25s   %-10s  %-20s  %-14s  %s\n",
-                        priority, submittimestamp, requested_seconds, jobid, procs, req_mem, newjobname, 
+                        priority, submittimestamp, requested_seconds, jobid, procs, req_mem, newjobname,
                         length(owner)>10 ? substr(owner,1,9) ">" : owner,
                         submittime, requested_time, ext) | sort_command
             }
@@ -680,7 +683,7 @@ if [[ $jobtypes == *"w"* ]] ; then
                                {
                                    if (listing)
                                    {
-                                        if (display_task) 
+                                        if (display_task)
                                         {
                                             name_header="[Task ID]"
                                         }
@@ -710,17 +713,17 @@ if [[ $jobtypes == *"w"* ]] ; then
                                    if (listing)
                                        { printy() }
                                }
-  
+
                                jobid=$1
                                priority=$2
                                owner=$4
                                procs=$8
                                submit_time=mktime(substr($6,7,4)" "substr($6,1,2)" "substr($6,4,2)" " \
                                                                         substr($7,1,2)" "substr($7,4,2)" "substr($7,7,2))
-                               submittime=strftime("%a %d %b %I:%M %p", submit_time)
+                               submittime=strftime("%a %d %b %I:%M %p", submit_time, 1)
                                waiting_seconds=actual_time - submit_time
                                waittime_days=int(waiting_seconds / 86400)
-                               waittime_time=strftime("%T", (waiting_seconds % 86400) - utc_offset)
+                               waittime_time=strftime("%T", (waiting_seconds % 86400) - utc_offset, 1)
                                if (relative) {
                                  submittime=sprintf("%3sd %s", "-"waittime_days, waittime_time)
                                }
@@ -746,7 +749,7 @@ if [[ $jobtypes == *"w"* ]] ; then
                                        { ext=ext", hold" }
                                    else
                                        { ext="hold"}
-                               }                               
+                               }
 
                                if (listuser)
                                {
@@ -789,9 +792,9 @@ if [[ $jobtypes == *"w"* ]] ; then
 
         /^ *(Hard Resources:)? *h_rt/ {
                                 sub(/^.*h_rt=/, "")
-                                h_rt=$1                                
+                                h_rt=$1
                                 req_days=int(h_rt / 86400)
-                                req_time=strftime("%T", (h_rt % 86400) - utc_offset)                                
+                                req_time=strftime("%T", (h_rt % 86400) - utc_offset, 1)
                                 requested_time=sprintf("%3dd %s", req_days, req_time)
                              }
 
@@ -801,7 +804,7 @@ if [[ $jobtypes == *"w"* ]] ; then
                                 # e.g. a 1 slot job: h_vmem=2G (257955735797760.000000)
                                 # The large number is 2G*1001
                                 req_mem=total_bytes/1024/1024/1024/1001
-                             }                                                         
+                             }
 
 
         END { if (! firstrun)
